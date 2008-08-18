@@ -20,30 +20,46 @@ public class Labyrinth {
 	private static final int NORTH=2;
 	private static final int EAST=4;
 	private static final int WEST=8;
-	private static final int NOTFREE=16;
-	private static String sSrc = "";
-	private static String sScale = "";
-	private static boolean debug = true;
-	private DebugInfo [][] debugInfo;
+	private String sSrc = "";
+	private String sScale = "";
+	private boolean colorful = false;
+	private DebugInfo [][] colorInfo;
+	/**
+	 * 1 = evenly choose a wall segment to extend from. >1 = prefere wall
+	 * segments built later and thus prefere getting long walls. 
+	 */
 	private int biasToLongWalls;
 	/**
 	 * grid of possible wall intersections
 	 */
 	private int [][] grid;
 	/**
-	 * for debugging this grid contains the order of the above grid
+	 * for debugging this grid contains the build order of the above grid such
+	 * as the color of the original outer wall segment. 
 	 * @author leo
-	 *
 	 */
 	public class DebugInfo {
 		public class Color {
 			public int r;
 			public int g;
 			public int b;
-			public String toString(int alpha){
-				alpha=Math.min(255,Math.max(16,alpha));
-				return "#"+String.format("%02X",r*alpha/256)+String.format("%02X",g*alpha/256)+String.format("%02X",b*alpha/256);
+			/**
+			 * @param brightnes a value between 0 and 255 that the rgb-values
+			 * get scaled with
+			 * @return a 6 digit hex representation as used in html.<br>
+			 * Example: #FF3300
+			 */
+			public String toString(int brightnes){
+				brightnes=Math.min(255,Math.max(16,brightnes));
+				return "#"
+				+String.format("%02X",r*brightnes/256)
+				+String.format("%02X",g*brightnes/256)
+				+String.format("%02X",b*brightnes/256);
 			}
+			/**
+			 * sets RGB to a random value normalized such that one component 
+			 * will be 00, another will be FF and the third something inbetween
+			 */
 			public void setRandomColor() {
 				r=(int) (Math.random()*256);
 				g=(int) (Math.random()*256);
@@ -90,16 +106,19 @@ public class Labyrinth {
 	 * where <i>RND in [0;1[</i>.
 	 * @param scale
 	 */
-	public Labyrinth(int width, int height, int biasToLongWalls, int scale) {
+	public Labyrinth(int width, int height, int biasToLongWalls, int scale, boolean colorful) {
 		assertIntervall( 2,100,width,"width");
 		assertIntervall( 2,100,height,"height");
-		assertIntervall( 1, 20,biasToLongWalls,"biasToLongWalls");
+		assertIntervall( -20, 40,biasToLongWalls,"biasToLongWalls");
 		assertIntervall(10,200,scale,"scale");
 		this.biasToLongWalls=biasToLongWalls;
 		this.width=width;
 		this.height=height;
 		this.entryTop=0;//(int) (Math.random()*(width-1));
 		this.entryBottom=width-2;//(int) (Math.random()*(width-1));
+		this.colorful=colorful;
+		this.sSrc="";
+		this.sScale="";
 		if (scale==25) {
 			sSrc="xs";
 		} else if (scale==50) {
@@ -115,13 +134,18 @@ public class Labyrinth {
 			sScale=" style=\"width:"+scale+";height:"+scale+";\"";
 		}
 		grid=new int[width][height];
-		debugInfo=new DebugInfo[width][height];
+		colorInfo=new DebugInfo[width][height];
 		for (int x=0; x<width;x++)
 			for (int y=0; y<height; y++)
-				debugInfo[x][y]=new DebugInfo();
+				colorInfo[x][y]=new DebugInfo();
 	}
-	public String picString(int i) {
-		switch (i) {
+	/**
+	 * Maps the direction-bit-mask to a fitting image's name.
+	 * @param direction is a bit mask representing N, S, E and W walls.
+	 * @return name of an image
+	 */
+	public String picString(int direction) {
+		switch (direction) {
 		case 0: return "0.png";
 
 		case NORTH: return "N.png";
@@ -142,20 +166,22 @@ public class Labyrinth {
 		case NORTH | SOUTH | EAST: return "ESN.png";
 
 		case NORTH | SOUTH | EAST | WEST: return "EWSN.png";
-		default: return ""+i;
+		default: return ""+direction;
 		}
-
 	}
+	/**
+	 * @return html-table to visualize the labyrinth
+	 */
 	public String toString() {
-		String retVal = ("<br /><br />");
+		String retVal = "";
 		retVal+=("<table border=0 cellpadding=0 cellspacing=0>");
 		for(int i=0; i<height; i++) {
 			retVal+=("<tr>");
 			for(int j=0;j<width;j++) {
 				retVal+="<td";
-				if(debug) {
-					DebugInfo.Color c=debugInfo[j][i].c;
-					String style="background-color:"+c.toString((255-debugInfo[j][i].step*4)%256)+";";
+				if(colorful) {
+					DebugInfo.Color c=colorInfo[j][i].c;
+					String style="background-color:"+c.toString((255-colorInfo[j][i].step*4)%256)+";";
 					retVal+=" style=\""+style+"\"";
 				}
 				retVal+=">";
@@ -186,8 +212,10 @@ public class Labyrinth {
 		retVal+=("</table>");
 		return retVal;
 	}
-	public String getGrid() {
-		String retVal="";
+	/**
+	 * generates a new random labyrinth
+	 */
+	public void generate() {
 		int freeNodeCount=0;
 		///Knoten, die noch wachsen können. Array maximal großzügig dimensioniert.
 		int [] freeNode = new int[width*height];
@@ -216,8 +244,8 @@ public class Labyrinth {
 		int [][] pos={{0,0},{width-1,0},{0,height-1},{width-1,height-1}};
 		for (int i=0; i<4; i++) {
 			grid     [pos[i][0]][pos[i][1]]=EAST | SOUTH | WEST  | NORTH;
-			debugInfo[pos[i][0]][pos[i][1]].c.setRandomColor();
-			debugInfo[pos[i][0]][pos[i][1]].step=0;
+			colorInfo[pos[i][0]][pos[i][1]].c.setRandomColor();
+			colorInfo[pos[i][0]][pos[i][1]].step=0;
 		}
 		
 		//as freenode is read from with a tendency to read from the end to get longer branches,
@@ -225,14 +253,21 @@ public class Labyrinth {
 		shuffle(freeNode,freeNodeCount);
 		
 		for(int i=0;i<freeNodeCount;i++) {
-			debugInfo[freeNode[i]%width][freeNode[i]/width].c.setRandomColor();
-			debugInfo[freeNode[i]%width][freeNode[i]/width].step=0;
+			colorInfo[freeNode[i]%width][freeNode[i]/width].c.setRandomColor();
+			colorInfo[freeNode[i]%width][freeNode[i]/width].step=0;
 		}
 		while (freeNodeCount>0) {
-			double smoothedRandom=.999999999999;
-			for(int i=0;i<biasToLongWalls;i++)
-				smoothedRandom*=Math.random();
-			double randomPick=1-Math.abs(2*smoothedRandom-1);
+			double smoothedRandom=0;
+			double randomPick;
+			if(biasToLongWalls>0) {
+				for(int i=0;i<Math.abs(biasToLongWalls);i++)
+					smoothedRandom+=Math.random();
+				smoothedRandom/=Math.abs(biasToLongWalls);
+				randomPick=1-Math.abs(2*smoothedRandom-1);
+			} else if(biasToLongWalls==0)
+				randomPick=0.9999;//not very random
+			else
+				randomPick=0;//not very random
 			int freenodeid=(int) (randomPick*freeNodeCount);
 			int nodeId=freeNode[freenodeid];
 			int nodeX=freeNode[freenodeid]%width;
@@ -245,9 +280,9 @@ public class Labyrinth {
 					grid[nodeX][nodeY] |= NORTH;
 					grid[nodeX][nodeY-1] |= SOUTH;
 					freeNode[freeNodeCount++]=nodeId-width;
-					if(debug){
-						debugInfo[nodeX][nodeY-1].c=debugInfo[nodeX][nodeY].c;
-						debugInfo[nodeX][nodeY-1].step=debugInfo[nodeX][nodeY].step+1;
+					if(colorful){
+						colorInfo[nodeX][nodeY-1].c=colorInfo[nodeX][nodeY].c;
+						colorInfo[nodeX][nodeY-1].step=colorInfo[nodeX][nodeY].step+1;
 					}
 				}
 				break;
@@ -256,9 +291,9 @@ public class Labyrinth {
 					grid[nodeX][nodeY] |= SOUTH;
 					grid[nodeX][nodeY+1] |= NORTH;
 					freeNode[freeNodeCount++]=nodeId+width;
-					if(debug){
-						debugInfo[nodeX][nodeY+1].c=debugInfo[nodeX][nodeY].c;
-						debugInfo[nodeX][nodeY+1].step=debugInfo[nodeX][nodeY].step+1;
+					if(colorful){
+						colorInfo[nodeX][nodeY+1].c=colorInfo[nodeX][nodeY].c;
+						colorInfo[nodeX][nodeY+1].step=colorInfo[nodeX][nodeY].step+1;
 					}
 				}
 				break;
@@ -267,9 +302,9 @@ public class Labyrinth {
 					grid[nodeX][nodeY] |= WEST;
 					grid[nodeX-1][nodeY] |= EAST;
 					freeNode[freeNodeCount++]=nodeId-1;
-					if(debug){
-						debugInfo[nodeX-1][nodeY].c=debugInfo[nodeX][nodeY].c;
-						debugInfo[nodeX-1][nodeY].step=debugInfo[nodeX][nodeY].step+1;
+					if(colorful){
+						colorInfo[nodeX-1][nodeY].c=colorInfo[nodeX][nodeY].c;
+						colorInfo[nodeX-1][nodeY].step=colorInfo[nodeX][nodeY].step+1;
 					}
 				}
 				break;
@@ -278,9 +313,9 @@ public class Labyrinth {
 					grid[nodeX][nodeY] |= EAST;
 					grid[nodeX+1][nodeY] |= WEST;
 					freeNode[freeNodeCount++]=nodeId+1;
-					if(debug){
-						debugInfo[nodeX+1][nodeY].c=debugInfo[nodeX][nodeY].c;
-						debugInfo[nodeX+1][nodeY].step=debugInfo[nodeX][nodeY].step+1;
+					if(colorful){
+						colorInfo[nodeX+1][nodeY].c=colorInfo[nodeX][nodeY].c;
+						colorInfo[nodeX+1][nodeY].step=colorInfo[nodeX][nodeY].step+1;
 					}
 				}
 				break;
@@ -291,17 +326,21 @@ public class Labyrinth {
 					(0!=(grid[nodeX][nodeY] & WEST)  || 0!=(grid[nodeX-1][nodeY])) &&
 					(0!=(grid[nodeX][nodeY] & EAST) || 0!=(grid[nodeX+1][nodeY])) ) {
 				//				retVal+=((freenode[freenodeid]%GridWidth) << "/" << (freenode[freenodeid]/GridWidth) << " ";
-				grid[nodeX][nodeY] |= NOTFREE;
-				freeNode[freenodeid]=freeNode[--freeNodeCount];
+//				grid[nodeX][nodeY] |= NOTFREE;
+				for(int i=freenodeid;i<freeNodeCount-1;i++)
+					freeNode[i]=freeNode[i+1];
+				freeNodeCount--;
 			}
 		}
-		retVal+=toString();
-		return retVal;
 	}
-	//shuffling like that is not 100% random but easy
+	/**
+	 * This shuffler should do a fair shuffle according to http://www.cigital.com/papers/download/developer_gambling.pdf
+	 * @param freeNode
+	 * @param freeNodeCount shuffle only shuffles the first <em>freeNodeCount</em> elements of <em>freeNode</em>
+	 */
 	private void shuffle(int[] freeNode, int freeNodeCount) {
-		for(int i=0; i<freeNodeCount; swap(freeNode,i++,(int) (freeNodeCount*Math.random())));
-		
+		for (int i=0; i<freeNodeCount; i++)
+			swap(freeNode,i,i+(int) ((freeNodeCount-i)*Math.random()));
 	}
 	private void swap(int[] freeNode, int swap, int i) {
 			int tmp=freeNode[swap];
@@ -312,25 +351,50 @@ public class Labyrinth {
 	 * @param args
 	 */
 	public static void main(String[] args) {
-		Labyrinth l=new Labyrinth(25,20,5,10);
 		File f=new File("test.html");
 		try {
 			FileOutputStream fos=new FileOutputStream(f);
-			fos.write("<html><body>".getBytes());
-			Labyrinth.debug=true;
-			for (int i=0; i<5; i++)
-				fos.write(("<h1>Labyrinth("+l.width+","+l.height+")</h1>"+l.getGrid()).getBytes());
-			Labyrinth.debug=false;
-			for (int i=0; i<5; i++)
-				fos.write(("<h1>Labyrinth("+l.width+","+l.height+")</h1>"+l.getGrid()).getBytes());
+			fos.write("<html><head><title>Labyrinth results</title><meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\"></head><body>".getBytes());
 			
+			Labyrinth l=new Labyrinth(2,2,5,50,false);
+			l.generate();
+			fos.write(("<br /><br /><h1>For Beginners I</h1>"+l).getBytes());
+			
+			l=new Labyrinth(15,2,5,50,false);
+			l.generate();
+			fos.write(("<br /><br /><h1>For Beginners II</h1>"+l).getBytes());
+			
+			l=new Labyrinth(10,10,5,100,false);
+			l.generate();
+			fos.write(("<br /><br /><h1>For Moles</h1>"+l).getBytes());
+			
+			l=new Labyrinth(40,40,1,25,true);
+			l.generate();
+			fos.write(("<br /><br /><h1>For Beginners III (very short walls)</h1>As statistic effects become more obvious at larger scales, this is a 40x40 labyrinth. "+l).getBytes());
+			
+			l=new Labyrinth(20,20,-1,50,true);
+			l.generate();
+			fos.write(("<br /><br /><h1>What if we always pick the wall to extend that's not been touched the longest?</h1>"+l).getBytes());
+			
+			l=new Labyrinth(20,20,0,50,true);
+			l.generate();
+			fos.write(("<br /><br /><h1>For Beginners IV (very very long walls)</h1>This is a bit off the sceme of the other examples as here explicitly only the last built wall gets extended. A too strong bias to the lastly built walls can yield the same effect while in some cases it may result in very difficult labyrinths."+l).getBytes());
+			
+			l=new Labyrinth(20,20,10,50,true);
+			l.generate();
+			fos.write("<br /><br /><h1>My pick for wall length. Some with some without color to test ;)</h1>".getBytes());
+			for(boolean j:new boolean [] {true,false}) {
+				l.colorful=j;
+				for (int i=0; i<5; i++) {
+					l.generate();
+					fos.write(("<br /><br />"+l).getBytes());
+				}
+			}
 			fos.write("</body></html>".getBytes());
 			fos.close();
 		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}
